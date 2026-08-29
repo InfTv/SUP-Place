@@ -16,8 +16,8 @@ android {
         applicationId = "com.supplace.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 17
-        versionName = "0.4.8"
+        versionCode = 18
+        versionName = "0.4.9"
     }
 
     signingConfigs {
@@ -41,9 +41,12 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
-

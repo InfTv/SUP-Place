@@ -15,4 +15,9 @@ recovery-input/
 .android-sdk/
 .jdk/
 .gradle-dist/
-
+/dist/
+.android-cmd-temp/
+.android-user*/
+.android-commandline-tools.zip
+.gradle-*-bin.zip
+.jdk*.zip

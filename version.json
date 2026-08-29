@@ -1,0 +1,7 @@
+{
+  "versionCode": 18,
+  "versionName": "0.4.9",
+  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.9/SUP_Place_0.4.9.apk",
+  "changelog": "Восстановлены полные исходники SUP Place и добавлена проверка, загрузка и установка обновлений через GitHub Releases.",
+  "sha256": "1D52F20D16A5F48FD4A8E3D2FBC91A773E348672E07C17905393856535EF61A3"
+}

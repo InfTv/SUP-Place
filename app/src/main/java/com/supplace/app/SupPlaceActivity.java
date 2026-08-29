@@ -1,40 +1,76 @@
 package com.supplace.app;
 
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
+import android.provider.Settings;
 import android.provider.MediaStore;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class SupPlaceActivity extends Activity {
     private static final int REQUEST_IMPORT_REPORT = 1001;
     private static final int REQUEST_EXPORT_REPORT = 1002;
     private static final int MAX_REPORT_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_VERSION_BYTES = 256 * 1024;
+    private static final String VERSION_URL =
+            "https://raw.githubusercontent.com/InfTv/SUP-Place/main/version.json";
+    private static final String APK_MIME = "application/vnd.android.package-archive";
 
     private WebView webView;
     private String pendingImportedReport;
     private String pendingExportReport;
+    private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
+    private long updateDownloadId = -1L;
+    private String expectedUpdateSha256 = "";
+
+    private final BroadcastReceiver downloadReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            long completedId = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+            if (completedId == updateDownloadId) {
+                handleCompletedUpdate(completedId);
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         configureWebView();
+        registerDownloadReceiver();
         captureReportFromIntent(getIntent());
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private void configureWebView() {
         webView = new WebView(this);
         WebSettings settings = webView.getSettings();
@@ -99,6 +135,120 @@ public final class SupPlaceActivity extends Activity {
         runOnUiThread(() -> captureReportFromIntent(getIntent()));
     }
 
+    @JavascriptInterface
+    public void checkForUpdate() {
+        networkExecutor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(VERSION_URL).openConnection();
+                connection.setConnectTimeout(10_000);
+                connection.setReadTimeout(10_000);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty(
+                        "User-Agent", "SUP-Place/" + BuildConfig.VERSION_NAME
+                );
+                int responseCode = connection.getResponseCode();
+                if (responseCode < 200 || responseCode >= 300) {
+                    throw new IOException("HTTP " + responseCode);
+                }
+                String body;
+                try (InputStream input = connection.getInputStream()) {
+                    body = readUtf8(input, MAX_VERSION_BYTES);
+                }
+                JSONObject remote = new JSONObject(body);
+                int remoteCode = remote.getInt("versionCode");
+                String remoteName = remote.getString("versionName");
+                String apkUrl = remote.getString("apkUrl");
+                if (!isTrustedApkUrl(apkUrl)) {
+                    throw new IOException("Untrusted APK URL");
+                }
+                JSONObject result = new JSONObject();
+                result.put("ok", true);
+                result.put("available", remoteCode > BuildConfig.VERSION_CODE);
+                result.put("currentVersionCode", BuildConfig.VERSION_CODE);
+                result.put("currentVersionName", BuildConfig.VERSION_NAME);
+                result.put("versionCode", remoteCode);
+                result.put("versionName", remoteName);
+                result.put("apkUrl", apkUrl);
+                result.put("changelog", remote.optString("changelog", ""));
+                String sha256 = remote.getString("sha256").trim();
+                if (!sha256.matches("(?i)[0-9a-f]{64}")) {
+                    throw new IOException("Invalid APK hash");
+                }
+                result.put("sha256", sha256.toUpperCase(Locale.ROOT));
+                deliverUpdateResult(result);
+            } catch (Exception error) {
+                try {
+                    JSONObject result = new JSONObject();
+                    result.put("ok", false);
+                    result.put("message", "Не удалось проверить обновления");
+                    deliverUpdateResult(result);
+                } catch (Exception ignored) {
+                    // JSONObject construction with fixed strings cannot fail in practice.
+                }
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void downloadAndInstallUpdate(
+            String apkUrl,
+            String versionName,
+            String expectedSha256
+    ) {
+        runOnUiThread(() -> {
+            try {
+                if (!isTrustedApkUrl(apkUrl)) {
+                    throw new IOException("Untrusted APK URL");
+                }
+                if (expectedSha256 == null
+                        || !expectedSha256.matches("(?i)[0-9a-f]{64}")) {
+                    throw new IOException("Invalid APK hash");
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                        && !getPackageManager().canRequestPackageInstalls()) {
+                    Intent permission = new Intent(
+                            Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                            Uri.parse("package:" + getPackageName())
+                    );
+                    startActivity(permission);
+                    deliverDownloadState(
+                            "permission",
+                            "Разреши установку обновлений и нажми «Скачать» ещё раз"
+                    );
+                    return;
+                }
+
+                DownloadManager manager =
+                        (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                String safeVersion = versionName == null
+                        ? "update"
+                        : versionName.replaceAll("[^0-9A-Za-z._-]", "_");
+                String fileName = "SUP_Place_" + safeVersion + ".apk";
+                DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl))
+                        .setTitle("SUP Place " + safeVersion)
+                        .setDescription("Загрузка обновления")
+                        .setMimeType(APK_MIME)
+                        .setNotificationVisibility(
+                                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                        )
+                        .setDestinationInExternalPublicDir(
+                                Environment.DIRECTORY_DOWNLOADS,
+                                fileName
+                        );
+                updateDownloadId = manager.enqueue(request);
+                this.expectedUpdateSha256 = expectedSha256.toUpperCase(Locale.ROOT);
+                deliverDownloadState("downloading", "Обновление скачивается");
+            } catch (Exception error) {
+                deliverDownloadState("error", "Не удалось начать загрузку обновления");
+            }
+        });
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
@@ -138,6 +288,21 @@ public final class SupPlaceActivity extends Activity {
         callJavaScript("androidBack()");
     }
 
+    @Override
+    protected void onDestroy() {
+        try {
+            unregisterReceiver(downloadReceiver);
+        } catch (IllegalArgumentException ignored) {
+            // Receiver was not registered.
+        }
+        networkExecutor.shutdownNow();
+        if (webView != null) {
+            webView.destroy();
+        }
+        super.onDestroy();
+    }
+
+    @TargetApi(Build.VERSION_CODES.Q)
     private Uri createReportInDownloads(String json, String fileName) throws IOException {
         ContentValues values = new ContentValues();
         values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
@@ -204,6 +369,116 @@ public final class SupPlaceActivity extends Activity {
         }
     }
 
+    private void registerDownloadReceiver() {
+        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            //noinspection UnspecifiedRegisterReceiverFlag
+            registerReceiver(downloadReceiver, filter);
+        }
+    }
+
+    private void handleCompletedUpdate(long downloadId) {
+        DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+        try (Cursor cursor = manager.query(query)) {
+            if (cursor == null || !cursor.moveToFirst()) {
+                throw new IOException("Missing download");
+            }
+            int statusColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS);
+            if (cursor.getInt(statusColumn) != DownloadManager.STATUS_SUCCESSFUL) {
+                throw new IOException("Download failed");
+            }
+        } catch (Exception error) {
+            deliverDownloadState("error", "Не удалось скачать обновление");
+            return;
+        }
+
+        Uri apk = manager.getUriForDownloadedFile(downloadId);
+        if (apk == null) {
+            deliverDownloadState("error", "Скачанный APK не найден");
+            return;
+        }
+        try {
+            String actualSha256 = sha256(apk);
+            if (!actualSha256.equals(expectedUpdateSha256)) {
+                manager.remove(downloadId);
+                deliverDownloadState("error", "Проверка APK не пройдена — файл удалён");
+                return;
+            }
+            Intent install = new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(apk, APK_MIME)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(install);
+            deliverDownloadState("installing", "Открыт установщик Android");
+        } catch (Exception error) {
+            deliverDownloadState("error", "Не удалось открыть установщик Android");
+        }
+    }
+
+    private void deliverUpdateResult(JSONObject result) {
+        callJavaScript("onUpdateCheckResult(" + JSONObject.quote(result.toString()) + ")");
+    }
+
+    private void deliverDownloadState(String state, String message) {
+        callJavaScript(
+                "onUpdateDownloadState(" + JSONObject.quote(state) + ","
+                        + JSONObject.quote(message) + ")"
+        );
+    }
+
+    private static boolean isTrustedApkUrl(String value) {
+        if (value == null) {
+            return false;
+        }
+        Uri uri = Uri.parse(value);
+        String host = uri.getHost();
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || host == null) {
+            return false;
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        return host.equals("github.com")
+                || host.endsWith(".github.com")
+                || host.equals("githubusercontent.com")
+                || host.endsWith(".githubusercontent.com");
+    }
+
+    private static String readUtf8(InputStream input, int maxBytes) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > maxBytes) {
+                throw new IOException("Response is too large");
+            }
+            output.write(buffer, 0, read);
+        }
+        return output.toString(StandardCharsets.UTF_8.name());
+    }
+
+    private String sha256(Uri uri) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) {
+                throw new IOException("Unable to read downloaded APK");
+            }
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
+        StringBuilder hex = new StringBuilder(64);
+        for (byte value : digest.digest()) {
+            hex.append(String.format(Locale.ROOT, "%02X", value & 0xFF));
+        }
+        return hex.toString();
+    }
+
     private void callJavaScript(String expression) {
         if (webView != null) {
             webView.post(() -> webView.evaluateJavascript("javascript:" + expression, null));
@@ -216,4 +491,3 @@ public final class SupPlaceActivity extends Activity {
         return name.endsWith(".json") ? name : name + ".supplace.json";
     }
 }
-
