@@ -10,6 +10,7 @@ const buildFile = fs.readFileSync(
 );
 
 assert.ok(Number.isInteger(manifest.versionCode) && manifest.versionCode > 0);
+assert.equal(manifest.version, manifest.versionName);
 assert.match(manifest.versionName, /^\d+\.\d+\.\d+$/);
 assert.match(manifest.sha256, /^[A-F0-9]{64}$/);
 assert.equal(
