@@ -33,7 +33,9 @@ assert.equal(legacyV1.inventory.kayak2, 0);
 assert.equal(legacyV1.rentals[0].prepaid, 0);
 assert.equal(legacyV1.rentals[0].note, "");
 assert.equal(legacyV1.bookings[0].prepaid, 0);
+assert.equal(legacyV1.bookings[0].note, "");
 assert.equal(legacyV1.history[0].prepaid, 0);
+assert.equal(legacyV1.history[0].note, "");
 
 const legacyV2 = migrate({
   schemaVersion: 2,
@@ -78,4 +80,3 @@ assert.equal(futureFields.rentals[0].futurePaymentMethod, "cash");
 assert.equal(futureFields.futureTopLevelField.preserved, true);
 
 console.log("Report migrations: all compatibility checks passed");
-

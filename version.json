@@ -1,8 +1,8 @@
 {
-  "version": "0.4.9",
-  "versionCode": 18,
-  "versionName": "0.4.9",
-  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.9/SUP_Place_0.4.9.apk",
-  "changelog": "Восстановлены полные исходники SUP Place и добавлена проверка, загрузка и установка обновлений через GitHub Releases.",
-  "sha256": "1D52F20D16A5F48FD4A8E3D2FBC91A773E348672E07C17905393856535EF61A3"
+  "version": "0.4.10",
+  "versionCode": 19,
+  "versionName": "0.4.10",
+  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.10/SUP_Place_0.4.10.apk",
+  "changelog": "Предоплата теперь всегда показывает полную стоимость и остаток к оплате. Заметки и предоплата отображаются для активных прокатов и броней внутри импортированных отчётов. Добавлены проверки округления времени и тарификации.",
+  "sha256": "0107E5D75FCDC470D37F903282AF811667B33826A05414473BD5A24E262A64DF"
 }

@@ -16,8 +16,8 @@ android {
         applicationId = "com.supplace.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.4.9"
+        versionCode = 19
+        versionName = "0.4.10"
     }
 
     signingConfigs {
@@ -35,6 +35,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            vcsInfo.include = false
             if (releaseKeystore != null && releaseStorePassword != null) {
                 signingConfig = signingConfigs.getByName("release")
             }

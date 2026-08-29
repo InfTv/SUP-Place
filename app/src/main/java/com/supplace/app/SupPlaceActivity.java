@@ -157,7 +157,13 @@ public final class SupPlaceActivity extends Activity {
                 }
                 JSONObject remote = new JSONObject(body);
                 int remoteCode = remote.getInt("versionCode");
-                String remoteName = remote.getString("versionName");
+                String remoteName = remote.optString(
+                        "versionName",
+                        remote.optString("version", "")
+                ).trim();
+                if (remoteName.isEmpty()) {
+                    throw new IOException("Missing version name");
+                }
                 String apkUrl = remote.getString("apkUrl");
                 if (!isTrustedApkUrl(apkUrl)) {
                     throw new IOException("Untrusted APK URL");

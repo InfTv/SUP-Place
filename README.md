@@ -44,6 +44,8 @@ SUP_PLACE_KEY_PASSWORD
 
 ```text
 node tests/report-migration.test.mjs
+node tests/rental-rules.test.mjs
+node tests/version-manifest.test.mjs
 ```
 
 Подробности восстановления 0.4.8 находятся в

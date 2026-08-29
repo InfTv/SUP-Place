@@ -8,6 +8,10 @@ const buildFile = fs.readFileSync(
   new URL("../app/build.gradle.kts", import.meta.url),
   "utf8",
 );
+const appHtml = fs.readFileSync(
+  new URL("../app/src/main/assets/index.html", import.meta.url),
+  "utf8",
+);
 
 assert.ok(Number.isInteger(manifest.versionCode) && manifest.versionCode > 0);
 assert.equal(manifest.version, manifest.versionName);
@@ -21,6 +25,10 @@ assert.match(buildFile, new RegExp(`versionCode\\s*=\\s*${manifest.versionCode}`
 assert.match(
   buildFile,
   new RegExp(`versionName\\s*=\\s*"${manifest.versionName.replaceAll(".", "\\.")}"`),
+);
+assert.match(
+  appHtml,
+  new RegExp(`APP_VERSION='${manifest.versionName.replaceAll(".", "\\.")}'`),
 );
 
 console.log("Version manifest: release metadata is consistent");
