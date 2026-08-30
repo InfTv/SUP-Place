@@ -378,8 +378,9 @@ public final class SupPlaceActivity extends Activity {
     private void registerDownloadReceiver() {
         IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // DownloadManager is a system component outside this app's UID.
-            registerReceiver(downloadReceiver, filter, Context.RECEIVER_EXPORTED);
+            // ACTION_DOWNLOAD_COMPLETE is a system broadcast. For system-only
+            // runtime receivers Android allows (and recommends) no export flag.
+            registerReceiver(downloadReceiver, filter, 0);
         } else {
             //noinspection UnspecifiedRegisterReceiverFlag
             registerReceiver(downloadReceiver, filter);
