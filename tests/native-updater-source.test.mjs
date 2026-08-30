@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const java=fs.readFileSync(new URL("../app/src/main/java/com/supplace/app/SupPlaceActivity.java",import.meta.url),"utf8");
+assert.ok(java.includes("DownloadManager.ACTION_DOWNLOAD_COMPLETE"));
+assert.ok(java.includes("Context.RECEIVER_EXPORTED"),"DownloadManager completion receiver must accept broadcasts from the system download provider");
+assert.ok(!java.includes("Context.RECEIVER_NOT_EXPORTED"),"old receiver flag can miss DownloadManager completion on newer Android");
+assert.ok(java.includes('host.equals("github.com")'));
+assert.ok(java.includes('host.endsWith(".githubusercontent.com")'));
+assert.ok(java.includes("actualSha256.equals(expectedUpdateSha256)"),"APK SHA-256 must be verified before installer launch");
+assert.ok(java.includes("Intent.FLAG_GRANT_READ_URI_PERMISSION"),"Package Installer must get read permission for downloaded APK");
+console.log("Native updater source: receiver, trusted hosts, hash check, and installer grant passed");

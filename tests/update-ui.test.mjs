@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const html=fs.readFileSync(new URL("../app/src/main/assets/index.html",import.meta.url),"utf8");
+assert.ok(html.includes("safe-area-inset-top"),"top bar must respect Android safe area when WebView exposes it");
+assert.ok(html.includes("--android-status-inset','24px'"),"Android 15+ must have a status-bar fallback when WebView safe area is zero");
+assert.ok(html.includes("max(env(safe-area-inset-top),var(--android-status-inset))"),"top bar must use the larger native/fallback inset");
+assert.ok(html.includes("BACKUP_KEY='supplace_state_backup_v1'"),"state backup must exist");
+assert.ok(html.includes("setInterval(renderTick,30000)"),"timer must not wipe editable tariff fields");
+assert.ok(!html.includes("setInterval(render,30000)"),"full render timer would wipe unsaved inputs");
+assert.ok(html.includes("U.status==='downloading'"),"update UI must handle downloading state");
+assert.ok(html.includes("disabled>ЗАГРУЗКА…"),"download button must be disabled while downloading");
+assert.ok(html.includes("update-progress"),"download must have an in-app progress indicator");
+assert.ok(html.includes("ПРОДОЛЖИТЬ УСТАНОВКУ"),"permission flow must be resumable");
+assert.ok(html.includes("['downloading','installing','checking'].includes(U.status)"),"duplicate update starts must be blocked");
+assert.ok(html.includes("const APP_VERSION='0.4.12'"),"web UI version must be 0.4.12");
+console.log("Update UI: status inset, backup, timer, and update-state guards passed");
