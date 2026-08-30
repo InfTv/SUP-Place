@@ -12,7 +12,9 @@ assert.ok(html.includes("disabled>ЗАГРУЗКА…"),"download button must be
 assert.ok(html.includes("update-progress"),"download must have an in-app progress indicator");
 assert.ok(html.includes("ПРОДОЛЖИТЬ УСТАНОВКУ"),"permission flow must be resumable");
 assert.ok(html.includes("['downloading','installing','checking'].includes(U.status)"),"duplicate update starts must be blocked");
-assert.ok(html.includes("const APP_VERSION='0.4.18'"),"web UI version must be 0.4.17");
+assert.ok(html.includes("const APP_VERSION='0.4.19'"),"web UI version must be 0.4.19");
+assert.ok(html.includes("const APP_VERSION_CODE=28"),"web UI must know the installed versionCode independently of stale native BuildConfig constants");
+assert.ok(html.includes("Number(x.versionCode)>APP_VERSION_CODE"),"update availability must be decided from the actual packaged versionCode, not stale native BuildConfig in patched APKs");
 assert.ok(html.includes("function startUpdatePolling()"),"download completion must be polled without a runtime BroadcastReceiver");
 assert.ok(html.includes("Android.consumeLaunchReport()"),"poller must call the native DownloadManager status bridge");
 assert.ok(html.includes("Date.now()+120000"),"stalled download must have a finite timeout");

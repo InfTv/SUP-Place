@@ -52,7 +52,8 @@ const KEY='supplace_state_v1';
 const BACKUP_KEY='supplace_state_backup_v1';
 const REPORTS_KEY='supplace_received_reports_v1';
 const UPDATE_CHECK_KEY='supplace_last_update_check_v1';
-const APP_VERSION='0.4.18';
+const APP_VERSION='0.4.19';
+const APP_VERSION_CODE=28;
 let U={status:'idle',available:false,versionName:'',apkUrl:'',sha256:'',changelog:'',message:''};
 const blankTariffs=()=>({sup1:{p60:null},sup2:{p60:null},kayak1:{p60:null},kayak2:{p60:null}});
 const fresh=()=>({schemaVersion:5,inventory:{sup1:8,sup2:2,kayak1:2,kayak2:2},tariffs:blankTariffs(),rentals:[],bookings:[],history:[],seq:1});
@@ -214,7 +215,7 @@ function renderUpdateCard(){
  return `<div class="update-panel"><div class="name ${U.available?'update-available':''}">${title}</div><div class="update-message">${esc(message)}</div>${progress}${button}</div>`
 }
 function checkForUpdates(manual=false){if(['checking','downloading','installing'].includes(U.status))return;if(!(window.Android&&typeof Android.checkForUpdate==='function')){if(manual)toast('Проверка обновлений недоступна');return}U={...U,status:'checking',message:'Проверяю GitHub…'};renderHistory();Android.checkForUpdate()}
-function onUpdateCheckResult(raw){try{let x=JSON.parse(raw);if(!x.ok){U={...U,status:'error',available:false,message:x.message||'Не удалось проверить обновления'};renderHistory();return}localStorage.setItem(UPDATE_CHECK_KEY,String(Date.now()));U={status:'ready',available:!!x.available,versionName:x.versionName||'',apkUrl:x.apkUrl||'',sha256:x.sha256||'',changelog:x.changelog||'',message:''};renderHistory();if(U.available)toast('Доступно обновление '+U.versionName)}catch(e){U={...U,status:'error',message:'Не удалось обработать ответ обновления'};renderHistory()}}
+function onUpdateCheckResult(raw){try{let x=JSON.parse(raw);if(!x.ok){U={...U,status:'error',available:false,message:x.message||'Не удалось проверить обновления'};renderHistory();return}localStorage.setItem(UPDATE_CHECK_KEY,String(Date.now()));let available=Number(x.versionCode)>APP_VERSION_CODE;U={status:'ready',available,versionName:x.versionName||'',apkUrl:x.apkUrl||'',sha256:x.sha256||'',changelog:x.changelog||'',message:''};renderHistory();if(U.available)toast('Доступно обновление '+U.versionName)}catch(e){U={...U,status:'error',message:'Не удалось обработать ответ обновления'};renderHistory()}}
 let updatePollTimer=0,updatePollDeadline=0;
 function stopUpdatePolling(){if(updatePollTimer){clearInterval(updatePollTimer);updatePollTimer=0}updatePollDeadline=0}
 function startUpdatePolling(){stopUpdatePolling();updatePollDeadline=Date.now()+120000;updatePollTimer=setInterval(()=>{if(U.status!=='downloading')return stopUpdatePolling();if(Date.now()>updatePollDeadline){stopUpdatePolling();U={...U,status:'error',message:'Загрузка не завершилась за 2 минуты. Проверь интернет и повтори.'};return renderHistory()}try{if(window.Android&&typeof Android.consumeLaunchReport==='function')Android.consumeLaunchReport()}catch(e){}},700)}
