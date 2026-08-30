@@ -1,59 +1,68 @@
-name: Publish version manifest
+name: Publish version manifest fallback
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag, for example v0.4.20'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   publish:
-    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Build version.json from published APK
+      - name: Rebuild version.json
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_BODY: ${{ github.event.release.body }}
+          TAG: ${{ inputs.tag }}
         run: |
-          VERSION_NAME="${RELEASE_TAG#v}"
+          set -euo pipefail
+
+          VERSION_NAME="${TAG#v}"
           SOURCE_NAME="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
           VERSION_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
           test "$VERSION_NAME" = "$SOURCE_NAME"
-          ASSET="SUP_Place_${VERSION_NAME}.apk"
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir /tmp/supplace-release
-          APK="/tmp/supplace-release/$ASSET"
-          test -f "$APK"
-          SHA="$(sha256sum "$APK" | awk '{print toupper($1)}')"
-          export VERSION_NAME VERSION_CODE SHA RELEASE_BODY
+
+          APK_NAME="SUP_Place_${VERSION_NAME}.apk"
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$APK_NAME" \
+            --dir "$RUNNER_TEMP/release"
+
+          SHA="$(sha256sum "$RUNNER_TEMP/release/$APK_NAME" | awk '{print toupper($1)}')"
+          export VERSION_NAME VERSION_CODE SHA
+
           python - <<'PY'
           import json, os
-          version = os.environ['VERSION_NAME']
+          from pathlib import Path
+          version = os.environ["VERSION_NAME"]
+          notes = Path("release-notes.txt").read_text(encoding="utf-8").strip() if Path("release-notes.txt").exists() else ""
           data = {
-              'version': version,
-              'versionCode': int(os.environ['VERSION_CODE']),
-              'versionName': version,
-              'apkUrl': f'https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk',
-              'changelog': (os.environ.get('RELEASE_BODY') or '').strip(),
-              'sha256': os.environ['SHA'],
+              "version": version,
+              "versionCode": int(os.environ["VERSION_CODE"]),
+              "versionName": version,
+              "apkUrl": f"https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk",
+              "changelog": notes,
+              "sha256": os.environ["SHA"],
           }
-          with open('version.json', 'w', encoding='utf-8') as f:
+          with open("version.json", "w", encoding="utf-8") as f:
               json.dump(data, f, ensure_ascii=False, indent=2)
-              f.write('\n')
+              f.write("\n")
           PY
 
-      - name: Commit manifest
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add version.json
           if git diff --cached --quiet; then exit 0; fi
-          git commit -m "Publish ${GITHUB_REF_NAME} version manifest"
+          git commit -m "Rebuild ${TAG} version manifest"
           git push origin HEAD:main

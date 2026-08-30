@@ -1,26 +1,33 @@
-name: Build release candidate
+name: Publish staged SUP Place release
 
 on:
   push:
     branches: [main]
     paths:
+      - 'release/**'
+      - 'release-notes.txt'
       - 'app/**'
       - 'tests/**'
-      - 'build.gradle.kts'
-      - 'settings.gradle.kts'
-      - 'gradle.properties'
-      - 'gradle/**'
       - '.github/workflows/build-release.yml'
+      - '.github/workflows/publish-version-manifest.yml'
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: supplace-release
+  cancel-in-progress: false
 
 jobs:
-  build:
+  publish:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -35,22 +42,150 @@ jobs:
           node tests/report-restore.test.mjs
           node tests/background-update.test.mjs
 
-      - name: Build unsigned release APK
+      - name: Read version metadata
+        id: meta
         run: |
-          chmod +x gradlew
-          ./gradlew :app:assembleRelease --stacktrace
+          set -euo pipefail
 
-      - name: Align APK and collect local signer
+          VERSION_NAME="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+          VERSION_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
+          PUBLISHED_CODE="$(python - <<'PY'
+          import json
+          with open('version.json', encoding='utf-8') as f:
+              print(int(json.load(f)['versionCode']))
+          PY
+          )"
+
+          test -n "$VERSION_NAME"
+          test -n "$VERSION_CODE"
+
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "published_code=$PUBLISHED_CODE" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "apk=release/SUP_Place_${VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
+          echo "apk_name=SUP_Place_${VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
+
+          if [ "$VERSION_CODE" -le "$PUBLISHED_CODE" ]; then
+            echo "release_needed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to publish: source versionCode=$VERSION_CODE, published=$PUBLISHED_CODE"
+          else
+            echo "release_needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify staged signed APK
+        if: steps.meta.outputs.release_needed == 'true'
+        env:
+          APK: ${{ steps.meta.outputs.apk }}
+          EXPECTED_CODE: ${{ steps.meta.outputs.version_code }}
+          EXPECTED_NAME: ${{ steps.meta.outputs.version_name }}
         run: |
+          set -euo pipefail
+          test -f "$APK"
+
           BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-          "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk SUP_Place_release_aligned_unsigned.apk
-          cp "$BT/lib/apksigner.jar" apksigner.jar
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: supplace-release-candidate
-          retention-days: 3
-          if-no-files-found: error
-          path: |
-            SUP_Place_release_aligned_unsigned.apk
-            apksigner.jar
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+
+          CERT="$("$BT/apksigner" verify --print-certs "$APK" \
+            | awk '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
+          test "$CERT" = "fc9c498461213f9efd9b0ceea9d24898f357d22245183f8e10b03f0294e983ca"
+
+          BADGING="$("$BT/aapt" dump badging "$APK" | head -1)"
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='com.supplace.app'"
+          echo "$BADGING" | grep -q "versionCode='$EXPECTED_CODE'"
+          echo "$BADGING" | grep -q "versionName='$EXPECTED_NAME'"
+
+      - name: Create GitHub Release and upload APK
+        if: steps.meta.outputs.release_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          APK: ${{ steps.meta.outputs.apk }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing APK asset."
+            gh release upload "$TAG" "$APK" \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            if [ -s release-notes.txt ]; then
+              gh release create "$TAG" "$APK" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
+                --title "SUP Place $VERSION_NAME" \
+                --notes-file release-notes.txt
+            else
+              gh release create "$TAG" "$APK" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$GITHUB_SHA" \
+                --title "SUP Place $VERSION_NAME" \
+                --generate-notes
+            fi
+          fi
+
+      - name: Build version.json from published APK
+        if: steps.meta.outputs.release_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$RUNNER_TEMP/release"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$APK_NAME" \
+            --dir "$RUNNER_TEMP/release"
+
+          APK="$RUNNER_TEMP/release/$APK_NAME"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print toupper($1)}')"
+          export SHA
+
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          version = os.environ['VERSION_NAME']
+          notes_path = Path('release-notes.txt')
+          notes = notes_path.read_text(encoding='utf-8').strip() if notes_path.exists() else ''
+
+          data = {
+              "version": version,
+              "versionCode": int(os.environ["VERSION_CODE"]),
+              "versionName": version,
+              "apkUrl": f"https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk",
+              "changelog": notes,
+              "sha256": os.environ["SHA"],
+          }
+
+          with open("version.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+          PY
+
+      - name: Clean staging APK and commit manifest
+        if: steps.meta.outputs.release_needed == 'true'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          APK: ${{ steps.meta.outputs.apk }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add version.json
+          git rm -f "$APK"
+
+          git commit -m "Publish ${TAG}"
+          git pull --rebase origin main
+          git push origin HEAD:main
