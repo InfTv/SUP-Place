@@ -53,5 +53,3 @@ node tests/version-manifest.test.mjs
 
 Порядок публикации следующих APK описан в
 [`docs/releasing.md`](docs/releasing.md).
-
-<!-- gitsync-probe: 2026-08-30 -->
