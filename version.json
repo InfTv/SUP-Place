@@ -1,8 +1,8 @@
 {
-  "version": "0.4.16",
-  "versionCode": 25,
-  "versionName": "0.4.16",
-  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.16/SUP_Place_0.4.16.apk",
-  "changelog": "После успешного восстановления полученная копия отчёта теперь удаляется автоматически. Исправлено ложное сообщение об удалении отчёта при ошибке сохранения. Нативный updater оставлен без изменений для контрольного теста обновления с 0.4.15.",
-  "sha256": "82F95F59C6D01706D3CAD8D4B4766CA19C22272AFA5C0F6296660E9C8BC9DF7C"
+  "version": "0.4.17",
+  "versionCode": 26,
+  "versionName": "0.4.17",
+  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.17/SUP_Place_0.4.17.apk",
+  "changelog": "Исправлено завершение загрузки обновления: SUP Place теперь получает системное событие DownloadManager после скачивания APK, проверяет SHA-256 и автоматически открывает установщик Android. Остальная логика 0.4.16 не менялась.",
+  "sha256": "BCCABFA2FFA3D782B44777C457CD8E921D21E8ED56161427634E5220B4001F28"
 }
