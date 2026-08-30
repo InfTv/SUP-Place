@@ -16,8 +16,8 @@ android {
         applicationId = "com.supplace.app"
         minSdk = 23
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.4.13"
+        versionCode = 25
+        versionName = "0.4.16"
     }
 
     signingConfigs {

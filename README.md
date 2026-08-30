@@ -46,6 +46,9 @@ SUP_PLACE_KEY_PASSWORD
 node tests/report-migration.test.mjs
 node tests/rental-rules.test.mjs
 node tests/version-manifest.test.mjs
+node tests/update-ui.test.mjs
+node tests/native-updater-source.test.mjs
+node tests/report-restore.test.mjs
 ```
 
 Подробности восстановления 0.4.8 находятся в
@@ -53,3 +56,11 @@ node tests/version-manifest.test.mjs
 
 Порядок публикации следующих APK описан в
 [`docs/releasing.md`](docs/releasing.md).
+
+## Стабильность запуска
+
+Нативный startup-path 0.4.16 сохранён от проверенной на устройстве 0.4.15/0.4.10.
+Изменения 0.4.16 остаются в WebView UI/данных: после успешного восстановления
+полученная копия отчёта удаляется автоматически; при ошибке сохранения копия
+остаётся доступной. Нативный updater не менялся перед контрольным тестом обновления.
+

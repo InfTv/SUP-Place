@@ -12,5 +12,5 @@ assert.ok(html.includes("disabled>ЗАГРУЗКА…"),"download button must be
 assert.ok(html.includes("update-progress"),"download must have an in-app progress indicator");
 assert.ok(html.includes("ПРОДОЛЖИТЬ УСТАНОВКУ"),"permission flow must be resumable");
 assert.ok(html.includes("['downloading','installing','checking'].includes(U.status)"),"duplicate update starts must be blocked");
-assert.ok(html.includes("const APP_VERSION='0.4.13'"),"web UI version must be 0.4.13");
+assert.ok(html.includes("const APP_VERSION='0.4.16'"),"web UI version must be 0.4.16");
 console.log("Update UI: status inset, backup, timer, and update-state guards passed");
