@@ -1,12 +1,12 @@
 package com.supplace.app;
 
 import android.Manifest;
-import android.app.JobService;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.job.JobParameters;
+import android.app.job.JobService;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageInfo;
@@ -43,7 +43,7 @@ public final class UpdateCheckJobService extends JobService {
             try {
                 checkAndNotify();
             } catch (Exception ignored) {
-                // A failed background check is intentionally silent; JobScheduler tries again later.
+                // Silent background failure; next scheduled run will try again.
             } finally {
                 jobFinished(params, false);
             }
@@ -66,22 +66,16 @@ public final class UpdateCheckJobService extends JobService {
         JSONObject remote = fetchVersionManifest();
         int remoteCode = remote.getInt("versionCode");
         int currentCode = installedVersionCode();
-        if (remoteCode <= currentCode) {
-            return;
-        }
+        if (remoteCode <= currentCode) return;
 
         String remoteName = remote.optString(
                 "versionName",
                 remote.optString("version", "")
         ).trim();
-        if (remoteName.isEmpty()) {
-            return;
-        }
+        if (remoteName.isEmpty()) return;
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        if (remoteCode <= prefs.getInt(LAST_NOTIFIED_CODE, 0)) {
-            return;
-        }
+        if (remoteCode <= prefs.getInt(LAST_NOTIFIED_CODE, 0)) return;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -91,9 +85,7 @@ public final class UpdateCheckJobService extends JobService {
 
         NotificationManager manager =
                 (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (manager == null) {
-            return;
-        }
+        if (manager == null) return;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
@@ -107,21 +99,21 @@ public final class UpdateCheckJobService extends JobService {
 
         Intent openApp = new Intent(this, SupPlaceActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
         int pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
         }
+
         PendingIntent pending = PendingIntent.getActivity(
-                this,
-                0,
-                openApp,
-                pendingFlags
+                this, 0, openApp, pendingFlags
         );
 
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        builder.setSmallIcon(com.supplace.app.R.drawable.ic_launcher)
+
+        builder.setSmallIcon(R.drawable.ic_launcher)
                 .setContentTitle("Доступна версия " + remoteName)
                 .setContentText("Нажми, чтобы открыть SUP Place и обновиться")
                 .setContentIntent(pending)
@@ -141,17 +133,17 @@ public final class UpdateCheckJobService extends JobService {
             connection.setUseCaches(false);
             connection.setRequestProperty("Accept", "application/json");
             connection.setRequestProperty("User-Agent", "SUP-Place-background-update-check");
+
             int responseCode = connection.getResponseCode();
             if (responseCode < 200 || responseCode >= 300) {
                 throw new IOException("HTTP " + responseCode);
             }
+
             try (InputStream input = connection.getInputStream()) {
                 return new JSONObject(readUtf8(input, MAX_VERSION_BYTES));
             }
         } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+            if (connection != null) connection.disconnect();
         }
     }
 
@@ -170,13 +162,13 @@ public final class UpdateCheckJobService extends JobService {
         byte[] buffer = new byte[8192];
         int total = 0;
         int read;
+
         while ((read = input.read(buffer)) != -1) {
             total += read;
-            if (total > maxBytes) {
-                throw new IOException("Response is too large");
-            }
+            if (total > maxBytes) throw new IOException("Response is too large");
             output.write(buffer, 0, read);
         }
+
         return output.toString(StandardCharsets.UTF_8.name());
     }
 }
