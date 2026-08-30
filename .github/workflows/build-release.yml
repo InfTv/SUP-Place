@@ -1,0 +1,56 @@
+name: Build release candidate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'tests/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - '.github/workflows/build-release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Regression tests
+        run: |
+          node tests/report-migration.test.mjs
+          node tests/rental-rules.test.mjs
+          node tests/version-manifest.test.mjs
+          node tests/update-ui.test.mjs
+          node tests/native-updater-source.test.mjs
+          node tests/report-restore.test.mjs
+          node tests/background-update.test.mjs
+
+      - name: Build unsigned release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Align APK and collect local signer
+        run: |
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk SUP_Place_release_aligned_unsigned.apk
+          cp "$BT/lib/apksigner.jar" apksigner.jar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supplace-release-candidate
+          retention-days: 3
+          if-no-files-found: error
+          path: |
+            SUP_Place_release_aligned_unsigned.apk
+            apksigner.jar

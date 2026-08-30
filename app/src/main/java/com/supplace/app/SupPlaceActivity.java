@@ -2,21 +2,27 @@ package com.supplace.app;
 
 import android.app.Activity;
 import android.app.DownloadManager;
+import android.app.job.JobInfo;
+import android.app.job.JobScheduler;
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
 import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.Manifest;
 import android.provider.MediaStore;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
@@ -39,6 +45,8 @@ import java.util.concurrent.Executors;
 public final class SupPlaceActivity extends Activity {
     private static final int REQUEST_IMPORT_REPORT = 1001;
     private static final int REQUEST_EXPORT_REPORT = 1002;
+    private static final int REQUEST_NOTIFICATIONS = 1003;
+    private static final String NOTIFICATION_PREFS = "supplace_update_notifications";
     private static final int MAX_REPORT_BYTES = 8 * 1024 * 1024;
     private static final int MAX_VERSION_BYTES = 256 * 1024;
     private static final String VERSION_URL =
@@ -66,8 +74,58 @@ public final class SupPlaceActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         configureWebView();
+        scheduleDailyUpdateCheck();
+        requestNotificationPermissionIfNeeded();
         registerDownloadReceiver();
         captureReportFromIntent(getIntent());
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                == PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        SharedPreferences prefs = getSharedPreferences(NOTIFICATION_PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean("permission_asked", false)) {
+            return;
+        }
+        prefs.edit().putBoolean("permission_asked", true).apply();
+        requestPermissions(
+                new String[]{Manifest.permission.POST_NOTIFICATIONS},
+                REQUEST_NOTIFICATIONS
+        );
+    }
+
+    private void scheduleDailyUpdateCheck() {
+        try {
+            JobScheduler scheduler = (JobScheduler) getSystemService(JOB_SCHEDULER_SERVICE);
+            if (scheduler == null) {
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                if (scheduler.getPendingJob(UpdateCheckJobService.JOB_ID) != null) {
+                    return;
+                }
+            } else {
+                for (JobInfo job : scheduler.getAllPendingJobs()) {
+                    if (job.getId() == UpdateCheckJobService.JOB_ID) {
+                        return;
+                    }
+                }
+            }
+            JobInfo job = new JobInfo.Builder(
+                    UpdateCheckJobService.JOB_ID,
+                    new ComponentName(this, UpdateCheckJobService.class)
+            )
+                    .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+                    .setPersisted(true)
+                    .setPeriodic(24L * 60L * 60L * 1000L)
+                    .build();
+            scheduler.schedule(job);
+        } catch (Exception ignored) {
+            // Background update checks must never affect normal app startup.
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")

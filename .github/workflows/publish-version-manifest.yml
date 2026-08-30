@@ -1,0 +1,59 @@
+name: Publish version manifest
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Build version.json from published APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          VERSION_NAME="${RELEASE_TAG#v}"
+          SOURCE_NAME="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+          VERSION_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
+          test "$VERSION_NAME" = "$SOURCE_NAME"
+          ASSET="SUP_Place_${VERSION_NAME}.apk"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$ASSET" --dir /tmp/supplace-release
+          APK="/tmp/supplace-release/$ASSET"
+          test -f "$APK"
+          SHA="$(sha256sum "$APK" | awk '{print toupper($1)}')"
+          export VERSION_NAME VERSION_CODE SHA RELEASE_BODY
+          python - <<'PY'
+          import json, os
+          version = os.environ['VERSION_NAME']
+          data = {
+              'version': version,
+              'versionCode': int(os.environ['VERSION_CODE']),
+              'versionName': version,
+              'apkUrl': f'https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk',
+              'changelog': (os.environ.get('RELEASE_BODY') or '').strip(),
+              'sha256': os.environ['SHA'],
+          }
+          with open('version.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+          PY
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Publish ${GITHUB_REF_NAME} version manifest"
+          git push origin HEAD:main
