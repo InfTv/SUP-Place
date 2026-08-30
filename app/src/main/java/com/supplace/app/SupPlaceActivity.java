@@ -375,14 +375,13 @@ public final class SupPlaceActivity extends Activity {
         }
     }
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerDownloadReceiver() {
         IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            //noinspection UnspecifiedRegisterReceiverFlag
-            registerReceiver(downloadReceiver, filter);
-        }
+        // ACTION_DOWNLOAD_COMPLETE is a system broadcast. Android 14+ explicitly
+        // exempts system-only receivers from exported/not-exported flags. Using
+        // RECEIVER_NOT_EXPORTED blocks DownloadManager completion on some devices.
+        registerReceiver(downloadReceiver, filter);
     }
 
     private void handleCompletedUpdate(long downloadId) {
