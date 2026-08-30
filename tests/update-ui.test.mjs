@@ -12,5 +12,9 @@ assert.ok(html.includes("disabled>ЗАГРУЗКА…"),"download button must be
 assert.ok(html.includes("update-progress"),"download must have an in-app progress indicator");
 assert.ok(html.includes("ПРОДОЛЖИТЬ УСТАНОВКУ"),"permission flow must be resumable");
 assert.ok(html.includes("['downloading','installing','checking'].includes(U.status)"),"duplicate update starts must be blocked");
-assert.ok(html.includes("const APP_VERSION='0.4.17'"),"web UI version must be 0.4.17");
+assert.ok(html.includes("const APP_VERSION='0.4.18'"),"web UI version must be 0.4.17");
+assert.ok(html.includes("function startUpdatePolling()"),"download completion must be polled without a runtime BroadcastReceiver");
+assert.ok(html.includes("Android.consumeLaunchReport()"),"poller must call the native DownloadManager status bridge");
+assert.ok(html.includes("Date.now()+120000"),"stalled download must have a finite timeout");
+assert.ok(html.includes("message==='Не удалось скачать обновление'"),"transient not-complete poll result must not stop the polling UI");
 console.log("Update UI: status inset, backup, timer, and update-state guards passed");

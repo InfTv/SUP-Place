@@ -1,8 +1,8 @@
 {
-  "version": "0.4.17",
-  "versionCode": 26,
-  "versionName": "0.4.17",
-  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.17/SUP_Place_0.4.17.apk",
-  "changelog": "Исправлено завершение загрузки обновления: SUP Place теперь получает системное событие DownloadManager после скачивания APK, проверяет SHA-256 и автоматически открывает установщик Android. Остальная логика 0.4.16 не менялась.",
-  "sha256": "BCCABFA2FFA3D782B44777C457CD8E921D21E8ED56161427634E5220B4001F28"
+  "version": "0.4.18",
+  "versionCode": 27,
+  "versionName": "0.4.18",
+  "apkUrl": "https://github.com/InfTv/SUP-Place/releases/download/v0.4.18/SUP_Place_0.4.18.apk",
+  "changelog": "Исправлен встроенный updater без нестабильного BroadcastReceiver: SUP Place отслеживает завершение DownloadManager через безопасный polling только во время загрузки, после чего проверяет SHA-256 и автоматически открывает установщик Android. Добавлен таймаут зависшей загрузки. Остальная логика 0.4.16 сохранена.",
+  "sha256": "C5F7F6DDD32434AEEB9AAE70B8A0EE47C5859E8B9C2D40BE3C3E84D4DEB1E583"
 }

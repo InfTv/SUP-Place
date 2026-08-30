@@ -132,7 +132,9 @@ public final class SupPlaceActivity extends Activity {
 
     @JavascriptInterface
     public void consumeLaunchReport() {
-        runOnUiThread(() -> captureReportFromIntent(getIntent()));
+        // Legacy JS bridge name retained for compatibility. It now polls the
+        // current DownloadManager job instead of relying on a runtime receiver.
+        runOnUiThread(() -> handleCompletedUpdate(updateDownloadId));
     }
 
     @JavascriptInterface
@@ -375,13 +377,10 @@ public final class SupPlaceActivity extends Activity {
         }
     }
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerDownloadReceiver() {
-        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
-        // ACTION_DOWNLOAD_COMPLETE is a system broadcast. Android 14+ explicitly
-        // exempts system-only receivers from exported/not-exported flags. Using
-        // RECEIVER_NOT_EXPORTED blocks DownloadManager completion on some devices.
-        registerReceiver(downloadReceiver, filter);
+        // Intentionally empty. Dynamic ACTION_DOWNLOAD_COMPLETE receiver flags
+        // caused either missed events or launch crashes on newer Android.
+        // Completion is polled through DownloadManager from the WebView bridge.
     }
 
     private void handleCompletedUpdate(long downloadId) {
@@ -393,7 +392,7 @@ public final class SupPlaceActivity extends Activity {
             }
             int statusColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS);
             if (cursor.getInt(statusColumn) != DownloadManager.STATUS_SUCCESSFUL) {
-                throw new IOException("Download failed");
+                throw new IOException("Download not complete");
             }
         } catch (Exception error) {
             deliverDownloadState("error", "Не удалось скачать обновление");
