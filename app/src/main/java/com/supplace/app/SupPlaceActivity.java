@@ -52,6 +52,10 @@ public final class SupPlaceActivity extends Activity {
     private static final String VERSION_URL =
             "https://raw.githubusercontent.com/InfTv/SUP-Place/main/version.json";
     private static final String APK_MIME = "application/vnd.android.package-archive";
+    private static final int MAX_CLOUD_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_CLOUD_ERROR_BYTES = 256 * 1024;
+    private static final String SUPABASE_URL = "https://tqhesbyebqbqzepexgyo.supabase.co";
+    private static final String SUPABASE_PUBLISHABLE_KEY = "sb_publishable_jHiQlleA5yZS23F_CXBZnA_Waf8LDOs";
 
     private WebView webView;
     private String pendingImportedReport;
@@ -313,6 +317,94 @@ public final class SupPlaceActivity extends Activity {
                 deliverDownloadState("error", "Не удалось начать загрузку обновления");
             }
         });
+    }
+
+
+    @JavascriptInterface
+    public void cloudRpc(String requestId, String functionName, String paramsJson) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_-]{1,96}")
+                || !isAllowedCloudFunction(functionName)) {
+            deliverCloudResult(requestId == null ? "" : requestId, false,
+                    "{\"message\":\"INVALID_REQUEST\"}", 400);
+            return;
+        }
+        networkExecutor.execute(() -> {
+            HttpURLConnection connection = null;
+            try {
+                byte[] body = (paramsJson == null || paramsJson.trim().isEmpty() ? "{}" : paramsJson)
+                        .getBytes(StandardCharsets.UTF_8);
+                if (body.length > MAX_CLOUD_BYTES) {
+                    throw new IOException("Request is too large");
+                }
+                connection = (HttpURLConnection) new URL(
+                        SUPABASE_URL + "/rest/v1/rpc/" + functionName
+                ).openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(12_000);
+                connection.setReadTimeout(20_000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("apikey", SUPABASE_PUBLISHABLE_KEY);
+                connection.setRequestProperty("Accept", "application/json");
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                connection.setRequestProperty("User-Agent", "SUP-Place/" + BuildConfig.VERSION_NAME);
+                connection.setFixedLengthStreamingMode(body.length);
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(body);
+                }
+                int status = connection.getResponseCode();
+                boolean ok = status >= 200 && status < 300;
+                InputStream stream = ok ? connection.getInputStream() : connection.getErrorStream();
+                String response = stream == null ? "" : readUtf8(
+                        stream,
+                        ok ? MAX_CLOUD_BYTES : MAX_CLOUD_ERROR_BYTES
+                );
+                deliverCloudResult(requestId, ok, response, status);
+            } catch (Exception error) {
+                deliverCloudResult(
+                        requestId,
+                        false,
+                        "{\"message\":\"NETWORK_ERROR\"}",
+                        0
+                );
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        });
+    }
+
+    private static boolean isAllowedCloudFunction(String name) {
+        if (name == null) {
+            return false;
+        }
+        switch (name) {
+            case "supplace_pair_device":
+            case "supplace_device_status":
+            case "supplace_submit_daily_report":
+            case "supplace_owner_login":
+            case "supplace_owner_session":
+            case "supplace_owner_logout":
+            case "supplace_owner_locations":
+            case "supplace_owner_add_location":
+            case "supplace_owner_create_pair_code":
+            case "supplace_owner_devices":
+            case "supplace_owner_set_device_active":
+            case "supplace_owner_reports":
+            case "supplace_owner_report":
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void deliverCloudResult(String requestId, boolean ok, String body, int status) {
+        callJavaScript(
+                "onCloudRpcResult(" + JSONObject.quote(requestId) + ","
+                        + (ok ? "true" : "false") + ","
+                        + JSONObject.quote(body == null ? "" : body) + ","
+                        + status + ")"
+        );
     }
 
     @Override

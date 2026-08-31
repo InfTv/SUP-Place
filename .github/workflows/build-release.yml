@@ -1,15 +1,17 @@
-name: Publish staged SUP Place release
+name: Build and publish SUP Place
 
 on:
   push:
     branches: [main]
     paths:
-      - 'release/**'
-      - 'release-notes.txt'
       - 'app/**'
       - 'tests/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle.properties'
+      - 'gradle/**'
+      - 'release-notes.txt'
       - '.github/workflows/build-release.yml'
-      - '.github/workflows/publish-version-manifest.yml'
 
 permissions:
   contents: write
@@ -19,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
 
     steps:
@@ -41,151 +43,125 @@ jobs:
           node tests/native-updater-source.test.mjs
           node tests/report-restore.test.mjs
           node tests/background-update.test.mjs
+          node tests/cloud-sync.test.mjs
 
-      - name: Read version metadata
+      - name: Read release metadata
         id: meta
         run: |
           set -euo pipefail
-
-          VERSION_NAME="$(sed -n 's/.*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -1)"
+          VERSION_NAME="$(sed -n 's/.*versionName = "\([^" ]*\)".*/\1/p' app/build.gradle.kts | head -1)"
           VERSION_CODE="$(sed -n 's/.*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -1)"
-          PUBLISHED_CODE="$(python - <<'PY'
+          PUBLISHED_CODE="$(python - <<'PY2'
           import json
           with open('version.json', encoding='utf-8') as f:
               print(int(json.load(f)['versionCode']))
-          PY
+          PY2
           )"
-
           test -n "$VERSION_NAME"
           test -n "$VERSION_CODE"
-
           echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
           echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
           echo "published_code=$PUBLISHED_CODE" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION_NAME" >> "$GITHUB_OUTPUT"
-          echo "apk=release/SUP_Place_${VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
           echo "apk_name=SUP_Place_${VERSION_NAME}.apk" >> "$GITHUB_OUTPUT"
-
-          if [ "$VERSION_CODE" -le "$PUBLISHED_CODE" ]; then
-            echo "release_needed=false" >> "$GITHUB_OUTPUT"
-            echo "Nothing to publish: source versionCode=$VERSION_CODE, published=$PUBLISHED_CODE"
-          else
+          if [ "$VERSION_CODE" -gt "$PUBLISHED_CODE" ]; then
             echo "release_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_needed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to publish: source=$VERSION_CODE published=$PUBLISHED_CODE"
           fi
 
-      - name: Verify staged signed APK
+      - name: Build unsigned release APK
+        if: steps.meta.outputs.release_needed == 'true'
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease --stacktrace
+
+      - name: Sign and verify release APK
         if: steps.meta.outputs.release_needed == 'true'
         env:
-          APK: ${{ steps.meta.outputs.apk }}
+          RELEASE_KEY_B64: 'MIINgAIBAzCCDTYGCSqGSIb3DQEHAaCCDScEgg0jMIINHzCCBSoGCSqGSIb3DQEHBqCCBRswggUXAgEAMIIFEAYJKoZIhvcNAQcBMF8GCSqGSIb3DQEFDTBSMDEGCSqGSIb3DQEFDDAkBBDtk4ktvPSxbbmZLsCqjsOMAgJOIDAMBggqhkiG9w0CCQUAMB0GCWCGSAFlAwQBKgQQrGK6bJT2MzGx3273u34hPYCCBKAc5iWM3K5kXEpd2crIkkMTGv7Pzh3j7qv9U90XAMHx8MDTwLaBzHjxI0DmisAepJXwziuvZfPOC9wnj9fexRnjx1dsa2pVRzbS33dnuds4kryMJyp4I6bJXz7WnWebLJyE7fsYXGjVt/vAkMETOQygA1gG5BNpPxpGBJtXMz/xriUL2BtTJhNKtzyzLey3k2FUgAuSwZi2PLOwsTbbockkaroeFsy9Yl6qy5A3us+jNjz52C/VkyjvyhGFMsdFEIJkyBauH/qBE7hgdyO8aXS6t5T9JswxqoxyYnWMOzY4bECOD2LlRanGP7D1p8Z10sRXqlmZqXBdu2NXZgEi466koq/sM35PkeSkiG35FywFvKI41Tz+Y4qVyR0852D7N6rRFWgiLICO0lE98LJvHYNtAMGECB1VPzjlJCDehkd6omxdRJ/nzsmidte8FQCxuPm2IUeerppVznY5vZBLfDXIEmKrhKPW2xoALYf7QsLCb2WHJ8/eKBchBo1T0OLUNZi3YKgVWAgUNPMa+U0CPbwENdKgTGR8LaIebczP4UZc89uHyVkA5L9z0FSEfq4Kuk2CiZGOsPxncl7/wgdGknGvATo8oMypwURyHeE/h+Fs0J+eKeKVdd4DUyx0kO/f6nZlKKYOiFoQSKnEmTeKfOvBOP4307lry1f0g9j8/sVpztm17PQ+Gb971dgvpjfMs/Eo8/wtVo0/WNQrNEdHvjaui4lWXEaPh8Gzoi9K2oMQ74hwSbuyX1LG2svuwtTcINVNBc1cd0ERaEc7VYemne83mi/vqy8xbQVcoFKJGdVZc9xjuxl38xh8sr9gn3b2Nt5nTOKe5suy1GKtQyaXkA1GSQR4X3HAQaHuOpjxreI2s6TYMFomDFxRxfCYH3uAiJ5y0aSgW+0q60HPFbbSf8PPQbJ/D/SmaWd99qO+1DduxkM950+XVMemFGnVYMgEwfEWDT+dUD87zAv0/2X5r8/xFUTLtJhmRbkZWsxDU/rBsGDcotCcJRC/qXkTcG4bmrBIE7VNRV5LI4q07qyoD94gHgsb8t1MfV7G5hwuvxD17JiB7MTQOwkAEQ8nM3LiMB/DwboafpAGzFKDWO3xRpMxORKcod7QDufJdKAyE8ti2agGNgQhixMhTVSZqH4xYqLTx/3pbyqpg2mcWu2geQjxNbT2lxGnhw5CP2LIxn9GWdmfuhC3R1aQQieq/JZ//ZUXj5IZUWa+omWexM2CA1lQy1lsPKyUQOzsaHXmLZn8aSmxzMoGJhBk4pPZeNUNyvQTUtMvlyU03sjSdJTIlON7YDTxBHy7eu4m+LWc/Slzi4TxhmBxI86tv9LNfSlUxwMRwvdLOYw6uJuLR7hovrFeWgYrcSU4UD0gvYUuqv/IZzm5W+IK9dAaoZQqsllGxjBnTRQJjjzTkhwa398p6O+C3EWzhPnbpwZvBkbWGKOFYmE7KL626GbLr4SSRIcgvr3P53HIxPRNOkmFqvn3fdd5DdFCNSRPQQFgidkg7Q0gdgSdEWILntFz8p1nkktih+f7poKHc9oaUzPz5GwrXHRHnbh2oSXGxWO/RUDp1RLluDCCB+0GCSqGSIb3DQEHAaCCB94EggfaMIIH1jCCB9IGCyqGSIb3DQEMCgECoIIHeTCCB3UwXwYJKoZIhvcNAQUNMFIwMQYJKoZIhvcNAQUMMCQEEBX+xzi2BvZlRtoGZzEIlhkCAk4gMAwGCCqGSIb3DQIJBQAwHQYJYIZIAWUDBAEqBBBBr8ciECPxKLbr6hodm7m4BIIHEJ2YujHOLxDTWPVV24aUYm2M8Ah2PSzn8KbTgo7z5Y3/RRORpoBaVkZMBgoe1eIL61IZgvhzPqkbJ7hxSHJtCjNtr4Nw/lswHkKxHwWHSwOiDznhQ00SmBRWnqqN2ys/rX79X62oNAAhdJjDm4bwCbD+QLL8+UAWcNq5Ni35pZNFZuBhWuZg5p9X5dn3KooW+WltZGhHT58JknYBvlRlD6j+qiozDgS35JssreSRFy0dhzZc1P1bpg0HjGppiK28SJeSakj2RPoDDkQgMfJbZ0NaKnjJisMNOo3a4usCAKluBF1QvV7JSOKozI/wvrsifPHFzlic/D273qF/Gc8Ej6vQYiWoCyfAI84MQQzOT+P+6/U3cfRlbdA7ZSZiwet6J0qdJ8dfQSkr/p+DOF2t09reR/Q+eCQAMiV6I7fSqNglJSE6WpLw7o7QLj3sMzMB2dAEkftRyFSz4rtpQYIn7ketH4Q20tICTRayPxFE3TLAYzWGMK1I9r1wbvVupqu1vDeOWzj8UU5KJ4RGUcdf3oMdZXpzExclw2QUcXfI8p1PVmdk+wKJovfG7B2OOAIpK2u/XW4xKIr5SnpKURFja0j0feimYULbhBjYsivOuOG/2FBVYkJN3Z7VWfiO2rTXKcQKi9sKdv61Uu7p6wqt7rsXTL6E1Kcv+8z7+vxRkGswCdl6VJhE+w2jd+fJHQd7RN1kB0oxsbYhv5NKZDjfQ5NBKIIy5SAjbSzxfG5IZCyck2h7J9CR6EQhhPl1uEfoDtlz6Z8EHT+mLoXqJ37NuWikjRlKSdLuuuF3EY1UQpyTRLwmhNP5P0BA5vUUOeA/P0SQBn7j3iG/ghA09eyjQmktaUee8g9l94+HOEutV+8BJaVNfQnCLGpQtCe+kg+8USOKKmujR9gPdoionL4Ikey11YIHZnWlksG/GnzT91p9L7LNHLA+Cnn4Id7N77+iPgtMGVdaD4hwlJ22UAA38F5fpEi2r0bha0ElrNL8YRGOHMKDNM9MzNmAp7d440Qy0K5q4NBkHHfZtQkGptPNAXYSdMBOpJ4UtO8f5ohulO0QsY6clhirOSmjr9rWvqvnrpzlGbrkwTK5rTTu+9K0awZkKL6RaHLiJCzISpm+F0yBXn2JEyEWBp5sG9bq/RfXbTSZO/gJmHxajm63SdBlD2BUqAZnP6OxWjJ3wkbBcffcVt53U5aw7bNFFnmOWQ4oVulY3c3iZoq9RajkKETuHdcVrk1l8j9gm8gaOfEYL5lgmtSX1vOUHzq5moNRumX9wVhMCDYC/0HElONC/0KV+Q538Lzvfy/a7ry1ahRzJMlbC51koE1ZNcfhxQ2fZW8wdcQEua0ea69Rez4SYLcIsGyqzW5StvvNp+SdFiaL5jPtSbzNqI173d7P2DNmN3h2ly55q/kHG2kCr4HW88wVAIP1j8P0TkPXrOFiX5JivwEzzcniM1dIacFFCL2O+Liyb52A8ple2oCd08zJ38lXIPlmnnZ8VkWj6J4IEVv8GQuSfWgrCMW74ihsahzH27Xonbft6HETUuWsF1lhRpPOIrnriVCp/8OzUek18wWw/n5WYbDAiEQvIxUaPam3QoFcbBD4ww7v0My+a02s70wxHYwTtLfJ/FSoNAZfc53sxyv2gjvOqdOJFaLTLw6s2IBmllgk+DoVd1kvODe51xhpzXr3E8vxoTK/lshvxb5OYOP9kxbt+YTOa/Flma+ylV/W/0X5pXIopHiFGMUrMUIsa1TfLCVbnTMwQUuMlBe9CDXyKrm0JxCFqwQZJEy3CtdBa5QDKRiREadupdmKtFTksx1vQId44Ce0ymVJrknbXg5MZyQW/qB1/QEKUlLkx6nFwPluNlYcjEBL4ztCXi3WBSZMEck2wtEV8fTi3KefAH1cpm/pcuHTpxpVfE86kP/NO5/beTMPR9hqLQBNmni9zcr6ryGmmTpwNmR1RDfC3Bxevjn3lF9sRO8VPUtFV+kVW58IxInsGc5lj2DQCxQ0bwUQ4ePwHyZWRkDdNJ2Drx4Sh8Bb9CCO8U2LpP6nLisY4CJreAqils2j6vzTsn79riWJ3W3aA9PrlWK/g1S4jBPtsfsnAQRYi/itXZri0PtxbTY/hZnRxJEA2hULuqSgYmaI6NRZneCgDg24nEh6qxrPt72tNtAv+C4CaNrc3Ubq+Ilfl8dwZ3YGF1vwHXeK6kChB+/9BnA3XPuaaJnrtcAUGo2HGNaURoh9ZHFcPoDEW4zZgmLe4wOlO94oT6vh7M3DnyPhN+M9WVtdxnkoODghe/z9O7c5KSv6/43S2QxjW5eJmBvfDf3G4M55NpnJqsVmBPSdEtV3qmH/FQDzAq2xxotl4p6RsMHildmmiyTnoYHP6Z6/bqnGKvY1sbfMrRXGwVYYkp6rlosZAsycz5VXMUYwHwYJKoZIhvcNAQkUMRIeEABzAHUAcABwAGwAYQBjAGUwIwYJKoZIhvcNAQkVMRYEFIpvTREjm7xHOqPQyr1x0+jeiHiCMEEwMTANBglghkgBZQMEAgEFAAQgwftHMltjiD355hoLnJfsJ6nCFzQlB7ufGqsA1IE96h8ECB2Cddcd5lvSAgIIAA=='
+          RELEASE_PASSWORD_B64: 'LXlTYXpXd3RRWDgwOEVNUDB0SFc1YUh4WkowaEpGRGpnbzk5R0E='
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
           EXPECTED_CODE: ${{ steps.meta.outputs.version_code }}
           EXPECTED_NAME: ${{ steps.meta.outputs.version_name }}
         run: |
           set -euo pipefail
-          test -f "$APK"
-
           BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
-
-          "$BT/apksigner" verify --verbose --print-certs "$APK"
-
-          CERT="$("$BT/apksigner" verify --print-certs "$APK" \
-            | awk '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
+          KS="$RUNNER_TEMP/supplace-release.p12"
+          ALIGNED="$RUNNER_TEMP/supplace-aligned.apk"
+          printf '%s' "$RELEASE_KEY_B64" | base64 --decode > "$KS"
+          SUP_PLACE_STORE_PASSWORD="$(printf '%s' "$RELEASE_PASSWORD_B64" | base64 --decode)"
+          export SUP_PLACE_STORE_PASSWORD
+          chmod 600 "$KS"
+          "$BT/zipalign" -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk "$ALIGNED"
+          "$BT/apksigner" sign \
+            --ks "$KS" \
+            --ks-type PKCS12 \
+            --ks-key-alias supplace \
+            --ks-pass env:SUP_PLACE_STORE_PASSWORD \
+            --key-pass env:SUP_PLACE_STORE_PASSWORD \
+            --out "$APK_NAME" \
+            "$ALIGNED"
+          "$BT/apksigner" verify --verbose --print-certs "$APK_NAME"
+          CERT="$("$BT/apksigner" verify --print-certs "$APK_NAME" | awk '/certificate SHA-256 digest:/ {print tolower($NF); exit}')"
           test "$CERT" = "fc9c498461213f9efd9b0ceea9d24898f357d22245183f8e10b03f0294e983ca"
-
-          BADGING="$("$BT/aapt" dump badging "$APK" | head -1)"
+          BADGING="$("$BT/aapt" dump badging "$APK_NAME" | head -1)"
           echo "$BADGING"
           echo "$BADGING" | grep -q "name='com.supplace.app'"
           echo "$BADGING" | grep -q "versionCode='$EXPECTED_CODE'"
           echo "$BADGING" | grep -q "versionName='$EXPECTED_NAME'"
+          rm -f "$KS" "$ALIGNED"
 
-      - name: Create GitHub Release and upload APK
-        if: steps.meta.outputs.release_needed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-          APK: ${{ steps.meta.outputs.apk }}
-          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
-        run: |
-          set -euo pipefail
-
-          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; replacing APK asset."
-            gh release upload "$TAG" "$APK" \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
-          else
-            if [ -s release-notes.txt ]; then
-              gh release create "$TAG" "$APK" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$GITHUB_SHA" \
-                --title "SUP Place $VERSION_NAME" \
-                --notes-file release-notes.txt
-            else
-              gh release create "$TAG" "$APK" \
-                --repo "$GITHUB_REPOSITORY" \
-                --target "$GITHUB_SHA" \
-                --title "SUP Place $VERSION_NAME" \
-                --generate-notes
-            fi
-          fi
-
-      - name: Build version.json from published APK
+      - name: Create GitHub Release
         if: steps.meta.outputs.release_needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
           APK_NAME: ${{ steps.meta.outputs.apk_name }}
           VERSION_NAME: ${{ steps.meta.outputs.version_name }}
-          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
         run: |
           set -euo pipefail
-
-          mkdir -p "$RUNNER_TEMP/release"
-          gh release download "$TAG" \
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "$TAG" "$APK_NAME" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern "$APK_NAME" \
-            --dir "$RUNNER_TEMP/release"
+            --target "$GITHUB_SHA" \
+            --title "SUP Place $VERSION_NAME" \
+            --notes-file release-notes.txt
 
-          APK="$RUNNER_TEMP/release/$APK_NAME"
-          test -f "$APK"
-          SHA="$(sha256sum "$APK" | awk '{print toupper($1)}')"
-          export SHA
-
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-
-          version = os.environ['VERSION_NAME']
-          notes_path = Path('release-notes.txt')
-          notes = notes_path.read_text(encoding='utf-8').strip() if notes_path.exists() else ''
-
-          data = {
-              "version": version,
-              "versionCode": int(os.environ["VERSION_CODE"]),
-              "versionName": version,
-              "apkUrl": f"https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk",
-              "changelog": notes,
-              "sha256": os.environ["SHA"],
-          }
-
-          with open("version.json", "w", encoding="utf-8") as f:
-              json.dump(data, f, ensure_ascii=False, indent=2)
-              f.write("\n")
-          PY
-
-      - name: Clean staging APK and commit manifest
+      - name: Publish version.json
         if: steps.meta.outputs.release_needed == 'true'
         env:
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          VERSION_CODE: ${{ steps.meta.outputs.version_code }}
+          APK_NAME: ${{ steps.meta.outputs.apk_name }}
           TAG: ${{ steps.meta.outputs.tag }}
-          APK: ${{ steps.meta.outputs.apk }}
         run: |
           set -euo pipefail
-
+          SHA="$(sha256sum "$APK_NAME" | awk '{print toupper($1)}')"
+          export SHA
+          python - <<'PY2'
+          import json, os
+          from pathlib import Path
+          version = os.environ['VERSION_NAME']
+          notes = Path('release-notes.txt').read_text(encoding='utf-8').strip()
+          data = {
+              'version': version,
+              'versionCode': int(os.environ['VERSION_CODE']),
+              'versionName': version,
+              'apkUrl': f'https://github.com/InfTv/SUP-Place/releases/download/v{version}/SUP_Place_{version}.apk',
+              'changelog': notes,
+              'sha256': os.environ['SHA'],
+          }
+          with open('version.json', 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+          PY2
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add version.json
-          git rm -f "$APK"
-
-          git commit -m "Publish ${TAG}"
-          git pull --rebase origin main
+          git commit -m "Publish $TAG version manifest"
           git push origin HEAD:main
