@@ -41,6 +41,7 @@ import java.security.MessageDigest;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class SupPlaceActivity extends Activity {
     private static final int REQUEST_IMPORT_REPORT = 1001;
@@ -49,6 +50,7 @@ public final class SupPlaceActivity extends Activity {
     private static final String NOTIFICATION_PREFS = "supplace_update_notifications";
     private static final int MAX_REPORT_BYTES = 8 * 1024 * 1024;
     private static final int MAX_VERSION_BYTES = 256 * 1024;
+    private static final long UPDATE_CHECK_TIMEOUT_MS = 10_000L;
     private static final String VERSION_URL =
             "https://raw.githubusercontent.com/InfTv/SUP-Place/main/version.json";
     private static final String APK_MIME = "application/vnd.android.package-archive";
@@ -61,6 +63,9 @@ public final class SupPlaceActivity extends Activity {
     private String pendingImportedReport;
     private String pendingExportReport;
     private final ExecutorService networkExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService updateExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicLong updateCheckCounter = new AtomicLong();
+    private final AtomicLong activeUpdateCheckId = new AtomicLong();
     private long updateDownloadId = -1L;
     private String expectedUpdateSha256 = "";
 
@@ -201,12 +206,33 @@ public final class SupPlaceActivity extends Activity {
 
     @JavascriptInterface
     public void checkForUpdate() {
-        networkExecutor.execute(() -> {
+        final long checkId = updateCheckCounter.incrementAndGet();
+        activeUpdateCheckId.set(checkId);
+
+        if (webView != null) {
+            webView.postDelayed(() -> {
+                if (activeUpdateCheckId.compareAndSet(checkId, 0L)) {
+                    try {
+                        JSONObject result = new JSONObject();
+                        result.put("ok", false);
+                        result.put(
+                                "message",
+                                "Проверка заняла больше 10 секунд. Проверь интернет и повтори."
+                        );
+                        deliverUpdateResult(result);
+                    } catch (Exception ignored) {
+                        // Fixed JSONObject values cannot fail in practice.
+                    }
+                }
+            }, UPDATE_CHECK_TIMEOUT_MS);
+        }
+
+        updateExecutor.execute(() -> {
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(VERSION_URL).openConnection();
-                connection.setConnectTimeout(10_000);
-                connection.setReadTimeout(10_000);
+                connection.setConnectTimeout(5_000);
+                connection.setReadTimeout(5_000);
                 connection.setRequestProperty("Accept", "application/json");
                 connection.setRequestProperty(
                         "User-Agent", "SUP-Place/" + BuildConfig.VERSION_NAME
@@ -246,13 +272,13 @@ public final class SupPlaceActivity extends Activity {
                     throw new IOException("Invalid APK hash");
                 }
                 result.put("sha256", sha256.toUpperCase(Locale.ROOT));
-                deliverUpdateResult(result);
+                deliverUpdateResultIfActive(checkId, result);
             } catch (Exception error) {
                 try {
                     JSONObject result = new JSONObject();
                     result.put("ok", false);
                     result.put("message", "Не удалось проверить обновления");
-                    deliverUpdateResult(result);
+                    deliverUpdateResultIfActive(checkId, result);
                 } catch (Exception ignored) {
                     // JSONObject construction with fixed strings cannot fail in practice.
                 }
@@ -453,6 +479,8 @@ public final class SupPlaceActivity extends Activity {
         } catch (IllegalArgumentException ignored) {
             // Receiver was not registered.
         }
+        activeUpdateCheckId.set(0L);
+        updateExecutor.shutdownNow();
         networkExecutor.shutdownNow();
         if (webView != null) {
             webView.destroy();
@@ -569,6 +597,12 @@ public final class SupPlaceActivity extends Activity {
             deliverDownloadState("installing", "Открыт установщик Android");
         } catch (Exception error) {
             deliverDownloadState("error", "Не удалось открыть установщик Android");
+        }
+    }
+
+    private void deliverUpdateResultIfActive(long checkId, JSONObject result) {
+        if (activeUpdateCheckId.compareAndSet(checkId, 0L)) {
+            deliverUpdateResult(result);
         }
     }
 

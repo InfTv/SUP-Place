@@ -41,6 +41,7 @@ jobs:
           node tests/version-manifest.test.mjs
           node tests/update-ui.test.mjs
           node tests/native-updater-source.test.mjs
+          node tests/update-timeout.test.mjs
           node tests/report-restore.test.mjs
           node tests/background-update.test.mjs
           node tests/cloud-sync.test.mjs
