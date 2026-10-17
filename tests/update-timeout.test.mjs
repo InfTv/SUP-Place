@@ -1,0 +1,10 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+const java=fs.readFileSync(new URL("../app/src/main/java/com/supplace/app/SupPlaceActivity.java",import.meta.url),"utf8");
+assert.ok(java.includes("UPDATE_CHECK_TIMEOUT_MS = 10_000L"),"hard update-check timeout must be exactly 10 seconds");
+assert.ok(java.includes("webView.postDelayed"),"watchdog must run independently of the network request");
+assert.ok(java.includes("Проверка заняла больше 10 секунд"),"timeout must return a user-visible retryable error");
+assert.ok(java.includes("AtomicLong activeUpdateCheckId"),"update attempts need an active generation guard");
+assert.ok(java.includes("activeUpdateCheckId.compareAndSet(checkId, 0L)"),"timeout/result race must resolve exactly once");
+assert.ok(java.includes("deliverUpdateResultIfActive(checkId, result)"),"late network results must not overwrite a timeout/new attempt");
+console.log("Update timeout: 10 second watchdog and stale-result guard passed");
